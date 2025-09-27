@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>UV Compare – Australia</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { font-family: system-ui, Arial, sans-serif; }
+    body { margin: 0; padding: 24px; background:#f8f9fb; }
+    .grid { display: grid; grid-template-columns: 1fr auto 1fr; gap: 24px; align-items: start; }
+    .card { background: #fff; border-radius: 14px; box-shadow: 0 6px 18px rgba(0,0,0,.06); padding: 16px; }
+    label { display:block; font-size: 14px; color:#444; margin-bottom:6px; }
+    select, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #d9dee6; outline: none; }
+    button { padding: 12px 16px; border-radius: 12px; border: 0; cursor: pointer; }
+    .btn-primary { background: #2563eb; color: white; font-weight: 600; }
+    .center { display:flex; flex-direction: column; gap: 12px; align-items: center; }
+    .result h3 { margin: 0 0 6px 0; }
+    .result .uv { font-size: 28px; font-weight: 800; }
+    .muted { color:#6b7280; font-size: 13px; }
+    .summary { grid-column: 1 / 4; }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+      .summary { grid-column: auto; }
+    }
+  </style>
+</head>
+<body>
+  <h1>UV Compare: Suburbs in Australia</h1>
+  <p class="muted">Pick two states and suburbs, then compare UV levels and safety advice.</p>
+
+  <div class="grid">
+    <!-- Left side -->
+    <div class="card">
+      <label for="leftState">State</label>
+      <select id="leftState"></select>
+
+      <label for="leftSuburb">Suburb (type to search)</label>
+      <input id="leftSuburb" list="leftSuburbList" placeholder="e.g., Lakemba" />
+      <datalist id="leftSuburbList"></datalist>
+    </div>
+
+    <!-- Middle compare -->
+    <div class="center">
+      <button id="compareBtn" class="btn-primary">Compare</button>
+    </div>
+
+    <!-- Right side -->
+    <div class="card">
+      <label for="rightState">State</label>
+      <select id="rightState"></select>
+
+      <label for="rightSuburb">Suburb (type to search)</label>
+      <input id="rightSuburb" list="rightSuburbList" placeholder="e.g., Parramatta" />
+      <datalist id="rightSuburbList"></datalist>
+    </div>
+
+    <!-- Results -->
+    <div id="leftResult" class="card result" style="min-height:140px;"></div>
+    <div></div>
+    <div id="rightResult" class="card result" style="min-height:140px;"></div>
+
+    <!-- Summary -->
+    <div class="card summary" id="summary"></div>
+  </div>
+
+<script>
+const API = (path, params={}) => {
+  const url = new URL(path, window.location.origin.replace(/:\d+$/, ':5050')); // assumes backend on 5050
+  Object.entries(params).forEach(([k,v]) => v!=null && url.searchParams.append(k,v));
+  return fetch(url, {headers: {'Accept':'application/json'}}).then(r=>r.json());
+};
+
+const leftState = document.getElementById('leftState');
+const rightState = document.getElementById('rightState');
+const leftSuburb = document.getElementById('leftSuburb');
+const rightSuburb = document.getElementById('rightSuburb');
+const leftList = document.getElementById('leftSuburbList');
+const rightList = document.getElementById('rightSuburbList');
+const compareBtn = document.getElementById('compareBtn');
+const leftResult = document.getElementById('leftResult');
+const rightResult = document.getElementById('rightResult');
+const summaryBox = document.getElementById('summary');
+
+function setOptions(el, arr) {
+  el.innerHTML = arr.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+function setDatalist(listEl, items) {
+  listEl.innerHTML = items.map(i => `<option value="${i.name}">${i.display_name}</option>`).join('');
+}
+
+async function loadStates() {
+  const states = await API('http://localhost:5050/api/states');
+  setOptions(leftState, states);
+  setOptions(rightState, states);
+}
+
+async function searchSuburbs(side) {
+  const state = (side === 'left') ? leftState.value : rightState.value;
+  const q = (side === 'left') ? leftSuburb.value : rightSuburb.value;
+  if (!state || q.trim().length < 2) return;
+  const res = await API('http://localhost:5050/api/suburbs', {state, q, limit: 30});
+  setDatalist(side === 'left' ? leftList : rightList, res);
+}
+
+function renderResult(el, data) {
+  if (!data) { el.innerHTML = '<span class="muted">No result.</span>'; return; }
+  el.innerHTML = `
+    <h3>${data.suburb}, ${data.state}</h3>
+    <div class="uv">UV now: ${data.current_uv ?? 'N/A'}</div>
+    <div>Max today: <strong>${data.uv_max_today ?? 'N/A'}</strong> (clear-sky: ${data.uv_max_clear_sky_today ?? 'N/A'})</div>
+    <p class="muted">${data.advice_now}</p>
+  `;
+}
+
+async function compare() {
+  const left_state = leftState.value, right_state = rightState.value;
+  const left_suburb = leftSuburb.value.trim(), right_suburb = rightSuburb.value.trim();
+  if (!left_state || !right_state || !left_suburb || !right_suburb) {
+    alert('Please select both states and suburbs.'); return;
+  }
+  const data = await API('http://localhost:5050/api/compare',
+    {left_state, left_suburb, right_state, right_suburb});
+  renderResult(leftResult, data.left);
+  renderResult(rightResult, data.right);
+  summaryBox.innerHTML = `<h3>Summary & Recommendation</h3><p>${(data.summary || '').replace(/\n/g,'<br>')}</p>`;
+}
+
+leftSuburb.addEventListener('input', () => searchSuburbs('left'));
+rightSuburb.addEventListener('input', () => searchSuburbs('right'));
+compareBtn.addEventListener('click', compare);
+
+
+loadStates();
+</script>
+</body>
+</html>
